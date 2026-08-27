@@ -19,19 +19,25 @@ existing vault ingestion flow can pick them up.
 ## How the sync & state work
 
 **State** lives in `weread_state.json` (in this repo, git-ignored). For each
-book it records the exact highlight and review *IDs* already written to the
-inbox.
+book it records the highlight/review *IDs* already written to the inbox, plus a
+cheap change-detection fingerprint from the notebooks overview (the total note
+count and the recent-note timestamp).
 
-- **Incremental sync (default, `python3 -m weread_link`)** — loads the saved
-  state, and for every book only writes highlights/reviews whose IDs are NOT
-  already recorded. New content is appended to that book's existing note.
+- **Incremental sync (default, `python3 -m weread_link`)** — first fetches the
+  lightweight *overview* (one paginated list of books with their counts and
+  timestamps). For each book whose fingerprint changed (new/edited/deleted
+  notes), it pulls the full details and writes any genuinely-new highlights/
+  reviews. **Unchanged books are skipped entirely, with no per-book API
+  calls** — so a run where nothing changed costs only the overview request,
+  not ~2 calls per book.
 - **Full sync (`--full`)** — starts from **empty state** (it does *not* reuse
   the saved file), so it re-writes the full note for every book with
   highlights. Because the notes are overwritten from scratch (not appended),
   running `--full` is safe and simply reproduces the complete current content.
 
 > `--full` ignores prior state on purpose: it's for backfills / starting over.
-> Once you're set up, run without `--full` for fast daily increments.
+> Once you're set up, run without `--full` for fast daily increments. The CLI
+> reports how many books were `skipped` each run.
 
 ## Step 1 — Get your WeRead API key
 1. Open the WeRead app (微信读书) on your phone.
@@ -120,8 +126,10 @@ source .env
 python3 -m weread_link
 ```
 
-**Logging:** each run writes `logs/sync-<timestamp>.log`; the cron wrapper
-appends to `logs/cron.log`.
+**Logging:** every run appends a timestamped entry to `logs/sync.log` — a
+`started` line, then a `done ...` summary (`books_seen`, `notes_written`,
+`highlights`, `reviews`, `skipped`) or an `ERROR ... FAILED` line. The cron
+wrapper also captures stdio to `logs/cron.log`. Use the log to verify past runs.
 
 > ⚠️ If nothing happens when the cron fires, grant Full Disk Access (macOS) to
 > allow reading files under `~/knowledge-base`.

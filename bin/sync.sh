@@ -2,8 +2,8 @@
 # Periodic entry point for cron. Loads .env, runs incremental sync, logs output.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-LOG_DIR="$(pwd)/logs"
-mkdir -p "$LOG_DIR"
-LOG_FILE="$LOG_DIR/sync-$(date +%F-%H%M).log"
+LOGDIR="$(pwd)/logs"
+mkdir -p "$LOGDIR"
 set -a; [ -f .env ] && source .env; set +a
-exec python3 -m weread_link "$@" >"$LOG_FILE" 2>&1
+LOG_FILE="${WEREAD_LOG_FILE:-$LOGDIR/sync.log}"
+exec python3 -m weread_link --log "$LOG_FILE"

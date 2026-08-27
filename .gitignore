@@ -3,3 +3,4 @@ __pycache__/
 .env
 weread_state.json
 .venv/
+logs/

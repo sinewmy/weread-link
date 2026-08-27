@@ -15,7 +15,8 @@ note per book into the vault inbox (`~/knowledge-base/0-Inbox`).
   inbox notes to the vault's git remote (`--no-commit` to skip).
 - Cron runs the incremental sync at 06:45 on odd days (`1-31/2`), earlier than
   the KB-loop daily pass (Mon–Fri 07:09), so highlights land before processing.
-  Output logs to `logs/` (`sync-<ts>.log` per run, `cron.log` for the wrapper).
+  Every run appends a timestamped entry to `logs/sync.log` (start/done/failed +
+  summary); cron captures output too. Check `logs/` to verify runs.
 
 ## Running
 

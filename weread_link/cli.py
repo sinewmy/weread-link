@@ -13,6 +13,7 @@ import os
 
 from .client import WeReadClient
 from .gitops import commit_and_push
+from .logutil import RunLogger
 from .sync import SyncEngine
 
 
@@ -54,6 +55,11 @@ def main(argv: list[str] | None = None) -> int:
         default=os.environ.get("WEREAD_STATE_FILE", ""),
         help="State JSON path (default: $WEREAD_STATE_FILE or ./weread_state.json).",
     )
+    parser.add_argument(
+        "--log",
+        default=os.environ.get("WEREAD_LOG_FILE", ""),
+        help="Append log file path (default: $WEREAD_LOG_FILE or ./logs/sync.log).",
+    )
     args = parser.parse_args(argv)
 
     inbox = args.inbox or os.path.expanduser("~/knowledge-base/0-Inbox")
@@ -61,20 +67,34 @@ def main(argv: list[str] | None = None) -> int:
 
     client = WeReadClient(_api_key())
     engine = SyncEngine(client=client, inbox_dir=inbox, state_path=state_path)
-    result = engine.run(full=args.full, dry_run=args.dry_run)
+    log_path = args.log or os.path.abspath(os.path.join(os.getcwd(), "logs", "sync.log"))
+    log = RunLogger(log_path)
+
+    mode = "dry-run preview" if args.dry_run else ("full" if args.full else "incremental")
+    log.info(f"{mode} sync started")
+    try:
+        result = engine.run(full=args.full, dry_run=args.dry_run)
+    except Exception as exc:
+        log.error(f"{mode} sync FAILED: {exc}")
+        return 1
 
     if args.dry_run:
-        print(f"[dry-run] books_seen={result.books_seen} new_notes={result.new_notes} "
-              f"new_highlights={result.new_highlights} new_reviews={result.new_reviews} "
-              f"(nothing written)")
+        log.info(
+            f"{mode} done: books_seen={result.books_seen} new_notes={result.new_notes} "
+            f"highlights={result.new_highlights} reviews={result.new_reviews} "
+            f"skipped={result.skipped} (nothing written)"
+        )
     else:
-        print(f"[sync] books_seen={result.books_seen} notes_written={result.new_notes} "
-              f"highlights={result.new_highlights} reviews={result.new_reviews}")
+        log.info(
+            f"{mode} done: books_seen={result.books_seen} notes_written={result.new_notes} "
+            f"highlights={result.new_highlights} reviews={result.new_reviews} skipped={result.skipped}"
+        )
         if not args.no_commit:
-            commit_and_push(
+            committed = commit_and_push(
                 inbox,
                 message=f"Import WeRead highlights into inbox ({result.new_notes} books)",
             )
+            log.info("git commit+push: " + ("done" if committed else "nothing/not pushed"))
     return 0
 
 

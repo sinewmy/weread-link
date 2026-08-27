@@ -21,6 +21,7 @@ class SyncResult:
     """High-level summary of a sync pass."""
 
     books_seen: int = 0
+    skipped: int = 0
     new_notes: int = 0
     new_highlights: int = 0
     new_reviews: int = 0
@@ -94,22 +95,48 @@ class SyncEngine:
             bookmark_count=int(book.get("bookmarkCount") or 0),
         )
 
+    @staticmethod
+    def _fingerprint(book: dict) -> tuple[int, int]:
+        """Cheap change-detection fingerprint from the notebooks overview.
+
+        Returns (total_note_count, recent_sort_ts). If both are unchanged for a
+        book we already synced, the per-book detail endpoints can be skipped.
+        """
+        total = sum(int(book.get(k) or 0) for k in ("reviewCount", "noteCount", "bookmarkCount"))
+        return total, int(book.get("sort") or 0)
+
     def run(self, *, full: bool = False, dry_run: bool = False) -> SyncResult:
         os.makedirs(self.inbox_dir, exist_ok=True)
         states = {} if full else load_books(self.state_path)
         result = SyncResult()
         for book in self.client.all_notebooks():
-            if not book.get("bookId"):
+            book_id = book.get("bookId")
+            if not book_id:
                 continue
             result.books_seen += 1
+            total, sort = SyncEngine._fingerprint(book)
+
+            # Cheap change detection: if a known book's counts/timestamp are
+            # unchanged, skip it without any per-book detail API calls.
+            if not full and book_id in states:
+                st = states[book_id]
+                if st.total_count == total and st.sort == sort:
+                    result.skipped += 1
+                    continue
+            else:
+                st = states.setdefault(
+                    book_id,
+                    BookState(book_id=book_id, written_highlights=set(), written_reviews=set()),
+                )
+
             contents = self._extract(book)
-            st = states.setdefault(
-                contents.index.book_id,
-                BookState(book_id=contents.index.book_id, written_highlights=set(), written_reviews=set()),
-            )
             new_h = [h for h in contents.highlights if h.bookmark_id not in st.written_highlights]
             new_r = [r for r in contents.reviews if r.review_id not in st.written_reviews]
+            # keep state cheap-indicators fresh even if detail diff found nothing
+            st.total_count = contents.index.total_count
+            st.sort = contents.index.sort
             if not new_h and not new_r:
+                # counts moved (e.g. edit) but no genuinely-new IDs -> nothing to write
                 continue
             result.new_highlights += len(new_h)
             result.new_reviews += len(new_r)

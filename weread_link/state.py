@@ -18,6 +18,11 @@ class BookState:
     book_id: str
     written_highlights: set[str]
     written_reviews: set[str]
+    # Cheap change-detection fingerprint from /user/notebooks: total note count
+    # (reviewCount+noteCount+bookmarkCount) and the recent-note timestamp.
+    # If these are unchanged, the book is skipped without any detail calls.
+    total_count: int = 0
+    sort: int = 0
 
 
 def _load(path: str) -> dict[str, Any]:
@@ -36,6 +41,8 @@ def load_books(path: str) -> dict[str, BookState]:
             book_id=book_id,
             written_highlights=set(st.get("highlights", [])),
             written_reviews=set(st.get("reviews", [])),
+            total_count=int(st.get("total_count", 0) or 0),
+            sort=int(st.get("sort", 0) or 0),
         )
     return out
 
@@ -47,6 +54,8 @@ def save_books(path: str, states: dict[str, BookState]) -> None:
             bid: {
                 "highlights": sorted(st.written_highlights),
                 "reviews": sorted(st.written_reviews),
+                "total_count": st.total_count,
+                "sort": st.sort,
             }
             for bid, st in sorted(states.items())
         }

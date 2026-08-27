@@ -56,7 +56,16 @@ class WeReadClient:
             try:
                 return self._request_once(api_name, params)
             except WeReadError as exc:
-                if "频率超限" in str(exc) or "轮换" in str(exc):
+                msg = str(exc)
+                transient = (
+                    "频率超限" in msg
+                    or "轮换" in msg
+                    or "HTTP 403" in msg
+                    or "HTTP 429" in msg
+                    or "HTTP 499" in msg
+                    or "HTTP 5" in msg
+                )
+                if transient:
                     wait = self.retry_delay * (2**attempt)
                     print(f"[rate-limit] {api_name} retry in {wait:.0f}s ({attempt+1}/{self.max_retries})")
                     time.sleep(wait)

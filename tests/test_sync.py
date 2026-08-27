@@ -29,6 +29,22 @@ class FakeClient:
         return self._reviews
 
 
+class CountingFakeClient(FakeClient):
+    """FakeClient that also counts detail-endpoint calls."""
+
+    def __init__(self, notebook, bookmark, reviews):
+        super().__init__(notebook, bookmark, reviews)
+        self.detail_calls = 0
+
+    def bookmarklist(self, book_id):
+        self.detail_calls += 1
+        return self._bookmark
+
+    def my_reviews(self, book_id):
+        self.detail_calls += 1
+        return self._reviews
+
+
 def _note_path(inbox: Path, title: str) -> Path:
     return inbox / f"weread-{title}.md"
 
@@ -89,13 +105,62 @@ def test_full_then_incremental(tmp_path: Path) -> None:
     bookmark2["updated"].append(
         {"bookmarkId": "H3", "chapterUid": 11, "markText": "Third highlight.", "createTime": 1700000200, "range": "5"}
     )
-    box2 = FakeClient(fixture, bookmark2, reviews)
+    fixture2 = dict(fixture)
+    fixture2["noteCount"] = 3   # overview count now reflects the extra highlight
+    fixture2["sort"] = 200
+    box2 = FakeClient(fixture2, bookmark2, reviews)
     res3 = SyncEngine(box2, str(inbox), state_path=state_path).run()
     assert res3.new_highlights == 1
     assert res3.new_reviews == 0
 
     note_txt = (inbox / "weread-连-接.md").read_text(encoding="utf-8")
     assert "Third highlight." in note_txt
+
+
+def test_unchanged_books_skip_detail_calls(tmp_path: Path) -> None:
+    inbox = tmp_path / "inbox"
+    state_path = str(tmp_path / "state.json")
+    fixture = {
+        "bookId": "B1",
+        "book": {"title": "连 接", "author": "张三"},
+        "reviewCount": 1,
+        "noteCount": 2,
+        "bookmarkCount": 1,
+        "sort": 100,
+    }
+    bookmark = {
+        "chapters": [{"chapterUid": 11, "title": "T"}],
+        "updated": [{"bookmarkId": "H1", "chapterUid": 11, "markText": "x", "createTime": 1}],
+    }
+    reviews = [{"review": {"reviewId": "R1", "content": "y"}}]
+
+    # First incremental run: book has no prior state -> detail calls happen.
+    c1 = CountingFakeClient(fixture, bookmark, reviews)
+    SyncEngine(c1, str(inbox), state_path).run(full=True)
+    assert c1.detail_calls == 2  # bookmarklist + my_reviews
+
+    # Second run with identical overview -> must SKIP detail calls entirely.
+    c2 = CountingFakeClient(fixture, bookmark, reviews)
+    res = SyncEngine(c2, str(inbox), state_path).run()
+    assert res.skipped == 1
+    assert res.new_notes == 0
+    assert c2.detail_calls == 0  # the key assertion: no per-book API calls
+
+    # Overview counts change (e.g. new highlight) -> do not skip, re-pull.
+    changed = dict(fixture)
+    changed["noteCount"] = 3
+    changed["sort"] = 200
+    bookmark3 = {
+        "chapters": [{"chapterUid": 11, "title": "T"}],
+        "updated": [
+            {"bookmarkId": "H1", "chapterUid": 11, "markText": "x", "createTime": 1},
+            {"bookmarkId": "H3", "chapterUid": 11, "markText": "new", "createTime": 2},
+        ],
+    }
+    c3 = CountingFakeClient(changed, bookmark3, reviews)
+    res3 = SyncEngine(c3, str(inbox), state_path).run()
+    assert res3.new_highlights == 1  # H3 would be new
+    assert c3.detail_calls == 2
 
 
 def test_notes_render_frontmatter(tmp_path: Path) -> None:
