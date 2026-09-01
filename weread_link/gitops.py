@@ -84,10 +84,27 @@ def commit_and_push(
             text=True,
         )
         if push_run.returncode != 0:
-            print(
-                f"[git] push failed: {push_run.stderr.strip() or push_run.stdout.strip()} "
-                "(commit is saved locally)"
+            # Likely "! [rejected] ... (fetch first)": the remote has commits
+            # we do not have locally (e.g. the KB-loop agent pushed first).
+            # Merge the remote in, then push once more rather than leaving the
+            # commit stranded locally. A merge never overwrites local work; a
+            # conflict aborts the pull and we fall through to report failure.
+            pull = subprocess.run(
+                ["git", "-C", repo, "pull", "--no-rebase", remote, branch],
+                capture_output=True,
+                text=True,
             )
-            return False
+            if pull.returncode == 0:
+                push_run = subprocess.run(
+                    ["git", "-C", repo, "push", remote, branch],
+                    capture_output=True,
+                    text=True,
+                )
+            if push_run.returncode != 0:
+                print(
+                    f"[git] push failed: {push_run.stderr.strip() or push_run.stdout.strip()} "
+                    "(commit is saved locally)"
+                )
+                return False
         print(f"[git] pushed to {remote}/{branch}")
     return True
