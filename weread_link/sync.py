@@ -140,12 +140,6 @@ class SyncEngine:
                 continue
             result.new_highlights += len(new_h)
             result.new_reviews += len(new_r)
-            contents = BookContents(
-                index=contents.index,
-                highlights=new_h,
-                reviews=new_r,
-                bookmark_count=contents.bookmark_count,
-            )
             if not dry_run:
                 os.makedirs(self.inbox_dir, exist_ok=True)
                 fpath = os.path.join(self.inbox_dir, filename_for(contents))

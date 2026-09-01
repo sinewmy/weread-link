@@ -100,10 +100,12 @@ def test_full_then_incremental(tmp_path: Path) -> None:
     res2 = engine2.run()
     assert res2.new_notes == 0
 
-    # A new highlight arrives -> incremental pick it up, only that one
+    # A new highlight arrives -> incremental picks it up (only the new one is
+    # reported as new) but re-renders the FULL book note, keeping every
+    # highlight in reading order.
     bookmark2 = {"updated": bookmark["updated"], "chapters": bookmark["chapters"]}
     bookmark2["updated"].append(
-        {"bookmarkId": "H3", "chapterUid": 11, "markText": "Third highlight.", "createTime": 1700000200, "range": "5"}
+        {"bookmarkId": "H3", "chapterUid": 11, "markText": "Third highlight.", "createTime": 1700000200, "range": "5-6"}
     )
     fixture2 = dict(fixture)
     fixture2["noteCount"] = 3   # overview count now reflects the extra highlight
@@ -114,7 +116,12 @@ def test_full_then_incremental(tmp_path: Path) -> None:
     assert res3.new_reviews == 0
 
     note_txt = (inbox / "weread-连-接.md").read_text(encoding="utf-8")
+    assert "Hello highlight one." in note_txt
+    assert "Second highlight." in note_txt
     assert "Third highlight." in note_txt
+    # Full set stays in reading order (position-sorted within the chapter).
+    assert note_txt.index("Hello highlight one.") < note_txt.index("Second highlight.")
+    assert note_txt.index("Second highlight.") < note_txt.index("Third highlight.")
 
 
 def test_unchanged_books_skip_detail_calls(tmp_path: Path) -> None:
@@ -169,12 +176,29 @@ def test_notes_render_frontmatter(tmp_path: Path) -> None:
 
     contents = BookContents(
         index=BookIndex(book_id="B9", title="测试书", author="作者"),
-        highlights=[Highlight(bookmark_id="H1", chapter_uid=11, text="划线", create_time=1)],
+        highlights=[Highlight(bookmark_id="H1", chapter_uid=11, text="划线", create_time=1, range="1")],
     )
     text = render_note(contents)
     assert "title: 测试书" in text
     assert "type: resource" in text
     assert "> 划线" in text
+
+
+def test_highlights_sorted_by_position_within_chapter(tmp_path: Path) -> None:
+    from weread_link.models import BookContents, BookIndex, Highlight
+    from weread_link.notes import render_note
+
+    contents = BookContents(
+        index=BookIndex(book_id="B10", title="排序书"),
+        highlights=[
+            Highlight(bookmark_id="H3", chapter_uid=11, text="第三", create_time=1, range="30"),
+            Highlight(bookmark_id="H1", chapter_uid=11, text="第一", create_time=1, range="10"),
+            Highlight(bookmark_id="H2", chapter_uid=11, text="第二", create_time=1, range="20"),
+        ],
+    )
+    text = render_note(contents)
+    assert text.index("> 第一") < text.index("> 第二")
+    assert text.index("> 第二") < text.index("> 第三")
 
 
 def test_git_repo_root_detection(tmp_path: Path) -> None:

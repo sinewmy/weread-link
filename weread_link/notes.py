@@ -12,6 +12,16 @@ from datetime import datetime, timezone
 from .models import BookContents, Review
 
 
+def _position(highlight) -> int:
+    """Leading integer offset of a highlight's range, else 0.
+
+    WeRead's ``range`` field encodes the position (e.g. ``\"114-116\"``); using
+    its leading offset gives a deterministic reading-order sort.
+    """
+    m = re.match(r"\d+", highlight.range)
+    return int(m.group()) if m else 0
+
+
 def _safe_name(text: str) -> str:
     """Lowercase, keep letters/digits/Asian chars, collapse spaces."""
     text = re.sub(r"[^\w\u4e00-\u9fff]+", " ", text, flags=re.UNICODE).strip()
@@ -64,7 +74,7 @@ def render_note(contents: BookContents, *, source: str = "weread") -> str:
         for chapter, items in by_chapter.items():
             lines.append(f"### {chapter}")
             lines.append("")
-            for h in items:
+            for h in sorted(items, key=_position):
                 lines.append(f"> {h.text}")
                 lines.append("")
     lines.append("## 个人想法")
