@@ -15,7 +15,7 @@ from .models import BookContents, Review
 def _position(highlight) -> int:
     """Leading integer offset of a highlight's range, else 0.
 
-    WeRead's ``range`` field encodes the position (e.g. ``\"114-116\"``); using
+    WeRead's ``range`` field encodes the position (e.g. ``"114-116"``); using
     its leading offset gives a deterministic reading-order sort.
     """
     m = re.match(r"\d+", highlight.range)
@@ -47,7 +47,7 @@ def _frontmatter(contents: BookContents, source: str) -> str:
         f"author: {idx.author!r}\n"
         f"created: {today}\n"
         f"updated: {today}\n"
-        'tags: [weread, reading]\n'
+        "tags: [weread, reading]\n"
         "---\n"
     )
 
@@ -67,14 +67,22 @@ def render_note(contents: BookContents, *, source: str = "weread") -> str:
     if not contents.highlights:
         lines.append("_无划线_")
     else:
-        # group highlights by chapter for readability
-        by_chapter: dict[str, list] = {}
+        # group highlights by chapter_uid for deterministic chapter ordering
+        by_chapter: dict[int, list] = {}
+        chapter_titles: dict[int, str] = {}
         for h in contents.highlights:
-            by_chapter.setdefault(h.chapter_title or "(无章节)", []).append(h)
-        for chapter, items in by_chapter.items():
+            uid = int(h.chapter_uid or 0)
+            by_chapter.setdefault(uid, []).append(h)
+            # prefer the first non-empty title we see for the chapter
+            if uid not in chapter_titles or not chapter_titles[uid]:
+                chapter_titles[uid] = h.chapter_title or "(无章节)"
+
+        for chapter_uid in sorted(by_chapter.keys()):
+            chapter = chapter_titles.get(chapter_uid, "(无章节)")
             lines.append(f"### {chapter}")
             lines.append("")
-            for h in sorted(items, key=_position):
+            items = sorted(by_chapter[chapter_uid], key=_position)
+            for h in items:
                 lines.append(f"> {h.text}")
                 lines.append("")
     lines.append("## 个人想法")
