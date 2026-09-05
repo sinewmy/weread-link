@@ -7,6 +7,7 @@ vault's own orchestrator processes.
 
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass
 
@@ -105,6 +106,12 @@ class SyncEngine:
         total = sum(int(book.get(k) or 0) for k in ("reviewCount", "noteCount", "bookmarkCount"))
         return total, int(book.get("sort") or 0)
 
+    @staticmethod
+    def _highlight_hash(h: Highlight) -> str:
+        """Short hash of highlight content to detect edits to existing IDs."""
+        s = f"{h.text}\n{h.range}\n{h.create_time}"
+        return hashlib.sha1(s.encode("utf-8")).hexdigest()[:8]
+
     def run(self, *, full: bool = False, dry_run: bool = False) -> SyncResult:
         os.makedirs(self.inbox_dir, exist_ok=True)
         states = {} if full else load_books(self.state_path)
@@ -130,13 +137,29 @@ class SyncEngine:
                 )
 
             contents = self._extract(book)
-            new_h = [h for h in contents.highlights if h.bookmark_id not in st.written_highlights]
+
+            # Determine which highlights are new OR edited (same ID but content changed).
+            new_h: list[Highlight] = []
+            for h in contents.highlights:
+                cur_hash = SyncEngine._highlight_hash(h)
+                prev_hash = st.highlight_hashes.get(h.bookmark_id) if hasattr(st, "highlight_hashes") else None
+                if h.bookmark_id not in st.written_highlights:
+                    # genuinely new
+                    new_h.append(h)
+                elif prev_hash is not None and prev_hash != cur_hash:
+                    # ID existed but content changed -> treat as new (edited)
+                    new_h.append(h)
+                # update stored hash so next run starts from current content
+                if hasattr(st, "highlight_hashes"):
+                    st.highlight_hashes[h.bookmark_id] = cur_hash
+
             new_r = [r for r in contents.reviews if r.review_id not in st.written_reviews]
+
             # keep state cheap-indicators fresh even if detail diff found nothing
             st.total_count = contents.index.total_count
             st.sort = contents.index.sort
             if not new_h and not new_r:
-                # counts moved (e.g. edit) but no genuinely-new IDs -> nothing to write
+                # counts moved (e.g. edit that wasn't detected) or nothing genuinely-new -> nothing to write
                 continue
             result.new_highlights += len(new_h)
             result.new_reviews += len(new_r)
